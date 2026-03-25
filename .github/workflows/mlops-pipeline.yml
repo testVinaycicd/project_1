@@ -48,11 +48,11 @@ jobs:
 
       - name: Push model to s3 directly
         run: |
-          aws s3 cp models/churn_model.pkl s3://churn-model-bucket/models/churn_model.pkl
+          aws s3 cp models/churn_model.pkl s3://mlops-demo-dvc-mikey/models/churn_model.pkl
 
       - name: update inferance.yaml with s3 model path
         run: |
-          MODEL_URI='s3://churn-model-bucket/models/churn_model.pkl'
+          MODEL_URI='s3://mlops-demo-dvc-mikey/models/churn_model.pkl'
           sed -i "s|storageUri: .*|storageUrl: $MODEL_URI" inferance.yaml
 
       - name: commit changes
