@@ -1,0 +1,64 @@
+name: MLOps pipeline
+
+on:
+  push:
+    branches:
+      - main
+
+
+env:
+  AWS_REGION: ap-south-1
+  S3_BUCKET: churn-model-bucket
+
+
+jobs:
+  train-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write                                 #to update inferance.yaml for latest files
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}          # uses default token
+
+
+      - name: Setup python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Generate dataset
+        run: python generate_data.py
+
+      - name: Train Model
+        run: python train.py
+
+      - name: Configure AWS creds
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Push model to s3 directly
+        run: |
+          aws s3 cp models/churn_model.pkl s3://churn-model-bucket/models/churn_model.pkl
+
+      - name: update inferance.yaml with s3 model path
+        run: |
+          MODEL_URI='s3://churn-model-bucket/models/churn_model.pkl'
+          sed -i "s|storageUri: .*|storageUrl: $MODEL_URI" inferance.yaml
+
+      - name: commit changes
+        run:
+          git config --local user.email "action@github.com"
+          git config --local user.name "Github Action"
+          git ada inferance.yaml
+          git commit -m "update inferance file"
+          git push || echo "no changes to push"
