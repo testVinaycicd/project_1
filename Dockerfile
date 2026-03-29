@@ -1,14 +1,18 @@
 FROM python:3.11
 
 WORKDIR /app
-
+RUN mkdir -p /app/model
+RUN mkdir -p /app/data
 # install deps
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+COPY generate_data.py .
 # copy your code
 COPY train.py .
 COPY data/churn_data.csv .
+
+
 
 # optional: if you use local modules
 # COPY models/ ./models
