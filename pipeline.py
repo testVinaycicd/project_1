@@ -4,18 +4,27 @@ from kfp.dsl import component, Output, Dataset, Model, Metrics , Input
 
 
 
-@component(base_image="crysis307/churn-train:v7")
+@component(base_image="crysis307/churn-train:v8")
 def generate_data_op(data: Output[Dataset]):
     import subprocess
-    subprocess.run(["git", "clone", "https://github.com/testVinaycicd/project_1.git"], check=True)
     import os
+    import shutil
+
+    subprocess.run(
+        ["git", "clone", "https://github.com/testVinaycicd/project_1.git"],
+        check=True,
+    )
+
     os.chdir("project_1")
+
     subprocess.run(["dvc", "pull"], check=True)
-    # subprocess.run(["python", "train.py"], check=True)
+
+    shutil.copy("data/churn_data.csv", data.path)
 
 
 
-@component(base_image="crysis307/churn-train:v7")
+
+@component(base_image="crysis307/churn-train:v8")
 def validate_data_op(data: Input[Dataset]) -> bool:
     import pandas as pd
 
@@ -37,7 +46,7 @@ def validate_data_op(data: Input[Dataset]) -> bool:
 
 
 
-@component(base_image="crysis307/churn-train:v7")
+@component(base_image="crysis307/churn-train:v8")
 def train_op(
         data: Input[Dataset],
         model: Output[Model],
@@ -75,7 +84,7 @@ def get_production_metric_op() -> float:
     # need to write code to get previous model metrics from s3 before that implement s3 in the current project
 
 
-@component(base_image="crysis307/churn-train:v7")
+@component(base_image="crysis307/churn-train:v8")
 def promote_model_op(model: Input[Model]):
 
     import boto3
@@ -107,16 +116,16 @@ def churn_pipeline():
     data_task.set_caching_options(True)
     valid = validate_data_op(data=data_task.outputs["data"])
 
-    with dsl.If(valid.output == True):
-
-        train_task = train_op(data=data_task.outputs["data"])
-        auc = evaluate_op(metrics=train_task.outputs["metrics"])
-        prod_score = get_production_metric_op()
-
-        with dsl.If(auc.output > prod_score.output):
-            promote_model_op(model=train_task.outputs["model"])
-
-            print("Model Ready to Deploy")
+    # with dsl.If(valid.output == True):
+    #
+    #     train_task = train_op(data=data_task.outputs["data"])
+    #     auc = evaluate_op(metrics=train_task.outputs["metrics"])
+    #     prod_score = get_production_metric_op()
+    #
+    #     with dsl.If(auc.output > prod_score.output):
+    #         promote_model_op(model=train_task.outputs["model"])
+    #
+    #         print("Model Ready to Deploy")
 
 
 
