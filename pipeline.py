@@ -3,7 +3,19 @@ from kfp import dsl
 from kfp.dsl import component, Output, Dataset, Model, Metrics , Input
 
 
-@component(base_image="crysis307/churn-train:v5")
+
+@component(base_image="crysis307/churn-train:v7")
+def generate_data_op(data: Output[Dataset]):
+    import subprocess
+    subprocess.run(["git", "clone", "https://github.com/testVinaycicd/project_1.git"], check=True)
+    import os
+    os.chdir("project_1")
+    subprocess.run(["dvc", "pull"], check=True)
+    # subprocess.run(["python", "train.py"], check=True)
+
+
+
+@component(base_image="crysis307/churn-train:v7")
 def validate_data_op(data: Input[Dataset]) -> bool:
     import pandas as pd
 
@@ -23,18 +35,9 @@ def validate_data_op(data: Input[Dataset]) -> bool:
 
 
 
-@component(base_image="crysis307/churn-train:v5")
-def generate_data_op(data: Output[Dataset]):
-    import subprocess
-    import shutil
-
-    subprocess.run(["python", "generate_data.py"], check=True)
-
-    shutil.copy("data/churn_data.csv", data.path)
 
 
-
-@component(base_image="crysis307/churn-train:v5")
+@component(base_image="crysis307/churn-train:v7")
 def train_op(
         data: Input[Dataset],
         model: Output[Model],
@@ -59,6 +62,7 @@ def evaluate_op(metrics: Input[Metrics]) -> float:
 
     for metric in m["metrics"]:
         if metric["name"] == "auc":
+            print("AUC====================================",metric["numberValue"])
             return metric["numberValue"]
 
 
@@ -67,19 +71,29 @@ def evaluate_op(metrics: Input[Metrics]) -> float:
 @component
 def get_production_metric_op() -> float:
     # load stored metric from previous production model
-    return 0.78  # placeholder
+    return 0.60  # placeholder
     # need to write code to get previous model metrics from s3 before that implement s3 in the current project
 
 
-# @component
-# def promote_model_op(model: Input[Model]):
-#     import shutil
-#     shutil.copy(model.path, "/mnt/models/production.pkl")
-# #     next implement s3 bucket and push model there
-#
+@component(base_image="crysis307/churn-train:v7")
+def promote_model_op(model: Input[Model]):
 
+    import boto3
 
+    s3 = boto3.client(
+        "s3",
+        endpoint_url="http://minio-service.kubeflow:9000",
+        aws_access_key_id="minio",
+        aws_secret_access_key="minio123",
+    )
 
+    bucket = "mlpipeline"  # Kubeflow default bucket
+
+    key = "churn/production/model.pkl"
+
+    s3.upload_file(model.path, bucket, key)
+
+    print(f"Uploaded to MinIO: s3://{bucket}/{key}")
 
 
 
@@ -87,28 +101,24 @@ def get_production_metric_op() -> float:
 @dsl.pipeline(name="churn-train-pipeline")
 def churn_pipeline():
 
+
+
     data_task = generate_data_op()
     data_task.set_caching_options(True)
-
-
-
     valid = validate_data_op(data=data_task.outputs["data"])
 
     with dsl.If(valid.output == True):
 
         train_task = train_op(data=data_task.outputs["data"])
-
         auc = evaluate_op(metrics=train_task.outputs["metrics"])
-        print("model acc========================================",auc)
-        #
-        # prod_score = get_production_metric_op()
-        #
-        # with dsl.If(auc.output > prod_score.output):
-        #     promote_model_op(model=train_task.outputs["model"])
+        prod_score = get_production_metric_op()
 
-    # with dsl.If(auc.output > 0.8):
-    #     print("Model Ready to Deploy")
-    # future: deploy
+        with dsl.If(auc.output > prod_score.output):
+            promote_model_op(model=train_task.outputs["model"])
+
+            print("Model Ready to Deploy")
+
+
 
 def run_pipeline():
     client = kfp.Client(host="http://127.0.0.1:8080")

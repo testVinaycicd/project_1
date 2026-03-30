@@ -8,7 +8,7 @@ kubectl apply -k "github.com/kubeflow/pipelines/manifests/kustomize/env/platform
 
 kubectl set image deployment/minio minio=minio/minio:RELEASE.2023-03-20T20-16-18Z -n kubeflow
 
-
+kubectl apply -f congig.yaml
 
 
 
@@ -28,3 +28,5 @@ data:
 kubectl rollout restart deployment workflow-controller -n kubeflow
 
 kubectl delete workflow -n kubeflow --all
+
+

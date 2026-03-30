@@ -1,21 +1,23 @@
-FROM python:3.11
+# -------- minimal, production-grade runtime --------
+FROM python:3.11-slim
 
+# -------- environment settings --------
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# -------- working directory --------
 WORKDIR /app
-RUN mkdir -p /app/model
-RUN mkdir -p /app/data
-# install deps
+
+# -------- install dependencies (cached layer) --------
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY generate_data.py .
-# copy your code
+# -------- copy only required source code --------
 COPY train.py .
-COPY data/churn_data.csv .
+COPY generate_data.py .
 
+# -------- create runtime directories --------
+RUN mkdir -p /app/model /app/data
 
-
-# optional: if you use local modules
-# COPY models/ ./models
-
-# default command not required for KFP, but fine to keep
+# -------- default execution --------
 CMD ["python", "train.py"]
