@@ -1,2 +1,0 @@
-['remote "modelremote"']
-    url = s3://mlops-demo-dvc-mikey/models
