@@ -4,27 +4,21 @@ from kfp.dsl import component, Output, Dataset, Model, Metrics , Input
 
 
 
-@component(base_image="crysis307/churn-train:v8")
+@component(base_image="crysis307/churn-train:v9")
 def generate_data_op(data: Output[Dataset]):
     import subprocess
-    import os
     import shutil
 
-    subprocess.run(
-        ["git", "clone", "https://github.com/testVinaycicd/project_1.git"],
-        check=True,
-    )
-
-    os.chdir("project_1")
-
+    # Pull data from S3 via DVC
     subprocess.run(["dvc", "pull"], check=True)
 
+    # Copy dataset to KFP artifact path
     shutil.copy("data/churn_data.csv", data.path)
 
 
 
 
-@component(base_image="crysis307/churn-train:v8")
+@component(base_image="crysis307/churn-train:v9")
 def validate_data_op(data: Input[Dataset]) -> bool:
     import pandas as pd
 
@@ -46,7 +40,7 @@ def validate_data_op(data: Input[Dataset]) -> bool:
 
 
 
-@component(base_image="crysis307/churn-train:v8")
+@component(base_image="crysis307/churn-train:v9")
 def train_op(
         data: Input[Dataset],
         model: Output[Model],
@@ -84,7 +78,7 @@ def get_production_metric_op() -> float:
     # need to write code to get previous model metrics from s3 before that implement s3 in the current project
 
 
-@component(base_image="crysis307/churn-train:v8")
+@component(base_image="crysis307/churn-train:v9")
 def promote_model_op(model: Input[Model]):
 
     import boto3
@@ -114,6 +108,7 @@ def churn_pipeline():
 
     data_task = generate_data_op()
     data_task.set_caching_options(True)
+    data_task.set_service_account("dvc-access-sa")
     valid = validate_data_op(data=data_task.outputs["data"])
 
     # with dsl.If(valid.output == True):
