@@ -1,0 +1,34 @@
+prometheus:
+  prometheusSpec:
+    retention: 1d
+    resources:
+      requests:
+        memory: 400Mi
+        cpu: 200m
+      limits:
+        memory: 800Mi
+
+grafana:
+  resources:
+    requests:
+      memory: 100Mi
+      cpu: 50m
+
+alertmanager:
+  alertmanagerSpec:
+    resources:
+      requests:
+        memory: 100Mi
+        cpu: 50m
+
+kubeStateMetrics:
+  resources:
+    requests:
+      memory: 50Mi
+      cpu: 50m
+
+nodeExporter:
+  resources:
+    requests:
+      memory: 50Mi
+      cpu: 50m
