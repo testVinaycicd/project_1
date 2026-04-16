@@ -1,0 +1,76 @@
+
+prometheus:
+  prometheusSpec:
+    serviceMonitorSelectorNilUsesHelmValues: false
+    serviceMonitorSelector: {}
+    retention: 1d
+    resources:
+      requests:
+        memory: 400Mi
+        cpu: 200m
+      limits:
+        memory: 800Mi
+
+grafana:
+  image:
+    tag: 11.1.0
+  sidecar:
+    plugins:
+      enabled: true
+      label: grafana_plugin
+      searchNamespace: monitoring
+  enabled: true
+  plugins:
+    - grafana-llm-app
+
+  # This section ensures the plugin is pre-configured in the database on boot
+
+
+  additionalDataSources:
+    - name: Prometheus
+      type: prometheus
+      uid: prometheus
+      access: proxy
+      url: http://monitoring-kube-prometheus-prometheus.monitoring.svc.cluster.local:9090
+      jsonData:
+        forwardToMcp: true
+        httpMethod: POST
+    - name: Loki
+      type: loki
+      uid: loki
+      access: proxy
+      url: http://loki.monitoring.svc.cluster.local:3100
+      jsonData:
+        forwardToMcp: true
+
+  grafana.ini:
+    feature_toggles:
+      enable: assistant,llmAssistant,vectorIndex,ExploreAssistant
+    # Essential for loading the LLM app in a self-managed cluster
+    plugins:
+      allow_loading_unsigned_plugins: grafana-llm-app
+    # Ensure Grafana Live is ready for the Assistant's streaming responses
+    live:
+      allowed_origins: "*"
+
+  env:
+    # Forced UI Toggles
+    GF_FEATURE_TOGGLES_ENABLE: "assistant,llmAssistant,vectorIndex"
+    GF_ASSISTANT_ENABLED: "true"
+    # Plugin Backend Overrides
+    GF_LLM_PLUGIN_BACKEND: "openai"
+    GF_LLM_PLUGIN_VECTOR_STORE: "none"
+    GF_LLM_PLUGIN_DATASOURCE_FORWARD_TO_MCP: "true"
+
+  resources:
+    requests:
+      memory: 300Mi # Slightly increased to handle the LLM sidecar
+      cpu: 150m
+
+alertmanager:
+  enabled: true
+  alertmanagerSpec:
+    resources:
+      requests:
+        memory: 100Mi
+        cpu: 50m

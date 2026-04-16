@@ -1,0 +1,5 @@
+[core]
+    remote = dataremote
+['remote "dataremote"']
+    url = s3://mlops-demo-dvc-mikey/data
+    endpointurl = http://minio-service:9000

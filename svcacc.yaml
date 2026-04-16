@@ -1,0 +1,73 @@
+#apiVersion: v1
+#kind: Namespace
+#metadata:
+#  name: ml
+#
+#
+#---
+#apiVersion: v1
+#kind: Secret
+#metadata:
+#  name: s3-secret
+#  namespace: ml
+#  annotations:
+#    serving.kserve.io/s3-endpoint: s3.amazonaws.com
+#    serving.kserve.io/s3-usehttps: "1"
+#    serving.kserve.io/s3-region: ap-south-1
+#type: Opaque
+#stringData:
+#  AWS_ACCESS_KEY_ID: ""
+#  AWS_SECRET_ACCESS_KEY: ""
+#
+#---
+#apiVersion: v1
+#kind: ServiceAccount
+#metadata:
+#  name: sa-s3-access
+#  namespace: ml
+#secrets:
+#  - name: s3-secret
+#
+#
+#
+
+
+# ─────────────────────────────────────────────
+# Namespace + S3 Secret + ServiceAccount for KServe
+#
+# HOW TO USE:
+#   1. Fill in your actual credentials below (or use kubectl create secret)
+#   2. kubectl apply -f svcacc.yaml
+#
+# In production: use Vault or AWS IRSA — never hardcode here.
+# For local minikube + MinIO: leave empty, MinIO doesn't need real AWS keys.
+# ─────────────────────────────────────────────
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ml
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: s3-secret
+  namespace: ml
+  annotations:
+    serving.kserve.io/s3-endpoint: minio-service.kubeflow:9000
+    serving.kserve.io/s3-usehttps: "0"          # HTTP for local MinIO
+    serving.kserve.io/s3-region: us-east-1       # MinIO ignores region but KServe requires it
+    serving.kserve.io/s3-verifyssl: "0"
+type: Opaque
+stringData:
+  AWS_ACCESS_KEY_ID: "minio"
+  AWS_SECRET_ACCESS_KEY: "minio123"
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sa-s3-access
+  namespace: ml
+secrets:
+  - name: s3-secret

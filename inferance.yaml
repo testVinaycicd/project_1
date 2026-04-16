@@ -1,0 +1,43 @@
+#apiVersion: serving.kserve.io/v1beta1
+#kind: InferenceService
+#metadata:
+#  name: churn-predictor
+#  namespace: ml
+#spec:
+#  predictor:
+#    serviceAccountName: sa-s3-access
+#    sklearn:
+#      storageUri: s3://mlops-demo-dvc-mikey/models/churn_model.pkl
+
+# ─────────────────────────────────────────────
+# KServe InferenceService — Churn Predictor
+#
+# Apply AFTER the pipeline has promoted a model to MinIO:
+#   kubectl apply -f inference.yaml
+#
+# Test:
+#   kubectl port-forward -n ml svc/churn-predictor-predictor 8080:80
+#   curl -X POST http://localhost:8080/v1/models/churn-predictor:predict \
+#     -H "Content-Type: application/json" \
+#     -d '{"instances": [[35, 24, 75.0, 1800.0, 3]]}'
+#
+# Note: storageUri points to MinIO (local minikube).
+# For AWS S3 in production, change to: s3://your-bucket/path/model.pkl
+# ─────────────────────────────────────────────
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: churn-predictor
+  namespace: ml
+spec:
+  predictor:
+    serviceAccountName: sa-s3-access
+    sklearn:
+      storageUri: s3://mlpipeline/churn/production/model.pkl
+      resources:
+        requests:
+          cpu: "100m"
+          memory: "256Mi"
+        limits:
+          cpu: "500m"
+          memory: "512Mi"

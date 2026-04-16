@@ -1,0 +1,55 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: argo-metrics
+  namespace: kubeflow
+  labels:
+    app: workflow-controller
+    # This label is critical; it tells the ServiceMonitor what to look for
+    prometheus-scrape: "true"
+spec:
+  ports:
+    - name: metrics
+      port: 9090
+      targetPort: 9090
+  selector:
+    # Make sure this matches the labels on your workflow-controller pod
+    app: workflow-controller
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: argo-workflows-monitor
+  namespace: monitoring
+  labels:
+    release: monitoring
+spec:
+  selector:
+    matchLabels:
+      prometheus-scrape: "true" # Ensure this matches your Service label
+  namespaceSelector:
+    matchNames:
+      - kubeflow
+  endpoints:
+    - port: metrics
+      interval: 30s
+      scheme: https             # <--- Tell Prometheus to use HTTPS
+      tlsConfig:
+        insecureSkipVerify: true # <--- Ignore self-signed cert issues
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: prometheus-k8s-argo-metrics
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: view # Standard 'view' role includes permission to hit metrics
+subjects:
+  - kind: ServiceAccount
+    name: prometheus-k8s # <--- Verify this name in 'kubectl get sa -n monitoring'
+    namespace: monitoring
+
+
+#So here are the metrics port, metrics port was 9090. the endpoint was not exposed.So we created a service. After creating the service, the metrics was exposed. Once the metrics was exposed, we created a service monitor to target from that specific label And from that, we are scraping all the data from Argo. Why Argo? Because pods are ephemeral. Once the pods get deleted, all the data gets deleted, even though if it's a success or a failure or an error, but Argo keeps everything in track, even though it failed because of an error or it had a complete failure and restarted again. Argo tracks everything, which makes this possible, which in turn gave us an alert saying QFlow pipeline has failed.

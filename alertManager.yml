@@ -1,0 +1,57 @@
+#apiVersion: monitoring.coreos.com/v1
+#kind: PrometheusRule
+#metadata:
+#  name: churn-pipeline-alerts
+#  namespace: monitoring
+#  labels:
+#    release: monitoring
+#spec:
+#  groups:
+#    - name: churn.rules
+#      rules:
+#        - alert: ArgoPipelineFailure
+#          expr: argo_workflows_gauge{namespace="kubeflow", status="Failed"} > 0
+#          for: 1m
+#          labels:
+#            severity: critical
+#          annotations:
+#            summary: "Kubeflow Pipeline Failed"
+#            description: "There are currently {{ $value }} failed workflows in the kubeflow namespace."
+
+
+
+# ─────────────────────────────────────────────
+# Prometheus Rule — Churn Pipeline Alerts
+# kubectl apply -f alertmanager.yaml
+# ─────────────────────────────────────────────
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: churn-pipeline-alerts
+  namespace: monitoring
+  labels:
+    release: monitoring
+spec:
+  groups:
+    - name: churn.pipeline.rules
+      rules:
+        # Alert when ANY Argo workflow in kubeflow namespace fails
+        - alert: ArgoPipelineFailure
+          expr: argo_workflows_gauge{namespace="kubeflow", status="Failed"} > 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Kubeflow Pipeline Failed"
+            description: "{{ $value }} failed workflow(s) in kubeflow namespace."
+
+        # Alert when model AUC drops below acceptable threshold
+        # (You will push this metric from iforest.py on Day 4)
+        - alert: ModelAUCDegraded
+          expr: churn_model_auc < 0.65
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Churn model AUC below threshold"
+            description: "AUC is {{ $value }}, below the 0.65 threshold. Retraining needed."
