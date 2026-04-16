@@ -1,11 +1,44 @@
-data/*
-!data/*.dvc
-models/*.pkl
-*.pyc
+# Python
 __pycache__/
-.dvc/cache
-.dvc/tmp
+*.pyc
+*.pyo
 .venv/
+venv/
+*.egg-info/
+
+# Data — never commit raw data, only .dvc pointers
+data/
+*.csv
+*.pkl
+*.parquet
+
+# Models
+models/
+*.pkl
+
+# Secrets — NEVER commit these
 .env
+*.env
+secrets.yaml
+*secret*.yaml
 
+# Kubeconfig
+*.kubeconfig
+kubeconfig
 
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# OS
+.DS_Store
+Thumbs.db
+
+# KFP compiled pipelines (regenerate from source)
+*.yaml.compiled
+pipeline_spec.json
