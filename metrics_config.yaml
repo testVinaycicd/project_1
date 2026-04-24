@@ -1,0 +1,120 @@
+# ═══════════════════════════════════════════════════════════
+# metrics_config.yaml  —  ML METADATA ONLY
+# ═══════════════════════════════════════════════════════════
+# PromQL has moved to prometheusrule.yaml (Kubernetes CRD).
+# This file only stores what the ML models need to know:
+#   - What is "normal" for this metric?
+#   - Are spikes bad or are drops bad?
+#   - What layer does this belong to?
+# ═══════════════════════════════════════════════════════════
+
+metrics:
+
+  # ── NODE ──────────────────────────────────────────────
+  - name: aiops:node_cpu_pct
+    unit: percent
+    layer: node
+    normal_min: 5.0
+    normal_max: 60.0
+    normal_std_pct: 15
+    higher_is_bad: true
+
+  - name: aiops:node_mem_available_ratio
+    unit: ratio
+    layer: node
+    normal_min: 0.25
+    normal_max: 0.85
+    normal_std_pct: 10
+    higher_is_bad: false
+
+#  - name: aiops:node_disk_available_ratio
+#    unit: ratio
+#    layer: node
+#    normal_min: 0.75      # was 0.30
+#    normal_max: 0.95      # was 0.90
+#    normal_std_pct: 5     # was 8
+#    higher_is_bad: false
+
+#  - name: aiops:node_load1
+#    unit: count
+#    layer: node
+#    normal_min: 0.1
+#    normal_max: 2.0
+#    normal_std_pct: 20
+#    higher_is_bad: true
+
+  # ── CONTAINER ─────────────────────────────────────────
+  - name: aiops:container_mem_bytes
+    unit: bytes
+    layer: container
+    normal_min: 200_000_000
+    normal_max: 2_000_000_000
+    normal_std_pct: 15
+    higher_is_bad: true
+
+  - name: aiops:container_cpu_throttle_ratio
+    unit: ratio
+    layer: container
+    normal_min: 0.0
+    normal_max: 0.05
+    normal_std_pct: 20
+    higher_is_bad: true
+
+  - name: aiops:container_oom_kills
+    unit: count
+    layer: container
+    normal_min: 0.0
+    normal_max: 0.0
+    normal_std_pct: 5
+    higher_is_bad: true
+
+  # ── WORKLOAD ──────────────────────────────────────────
+  - name: aiops:pod_restart_rate
+    unit: count
+    layer: workload
+    normal_min: 0.0
+    normal_max: 0.01
+    normal_std_pct: 10
+    higher_is_bad: true
+
+  - name: aiops:pods_not_running
+    unit: count
+    layer: workload
+    normal_min: 0.0
+    normal_max: 2.0
+    normal_std_pct: 10
+    higher_is_bad: true
+
+  - name: aiops:deployment_unavailable_ratio
+    unit: ratio
+    layer: workload
+    normal_min: 0.0
+    normal_max: 0.05
+    normal_std_pct: 10
+    higher_is_bad: true
+
+  # ── NETWORK ───────────────────────────────────────────
+  - name: aiops:net_receive_bytes_rate
+    unit: bytes_per_sec
+    layer: network
+    normal_min: 10_000
+    normal_max: 50_000_000
+    normal_std_pct: 30
+    higher_is_bad: true
+
+  - name: aiops:net_transmit_bytes_rate
+    unit: bytes_per_sec
+    layer: network
+    normal_min: 10_000
+    normal_max: 50_000_000
+    normal_std_pct: 30
+    higher_is_bad: true
+
+  # ── PIPELINE ──────────────────────────────────────────
+  - name: aiops:argo_failed_workflows
+    unit: count
+    layer: pipeline
+    normal_min: 0.0
+    normal_max: 0.0
+    normal_std_pct: 5
+    higher_is_bad: true
