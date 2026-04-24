@@ -28,13 +28,14 @@
 
 # ─────────────────────────────────────────────
 # Churn Prediction Training Image
-# Build: docker build -t crysis307/churn-train:v10 .
-# Push:  docker push crysis307/churn-train:v10
+# Build: docker build -t crysis307/churn-train:v13 .
+# Push:  docker push crysis307/churn-train:v13
 #
-# What changed from v9:
-#   - train.py now lives at /app/training/train.py
-#     so the KFP component path reference is explicit
-#   - No secrets baked into image
+# What changed from v12:
+#   - Removed torch (not used in training — RandomForest only)
+#   - Removed dvc, fastapi, uvicorn, pydantic (not needed in container)
+#   - Removed hardcoded dvc[s3] pip install
+#   - Image should be ~500-700MB instead of 5.71GB
 # ─────────────────────────────────────────────
 FROM python:3.11-slim
 
@@ -47,8 +48,7 @@ RUN apt-get update && apt-get install -y \
 
 # Python deps
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt && \
-    pip install --no-cache-dir dvc[s3]
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy project — preserving folder structure
 COPY training/ /app/training/

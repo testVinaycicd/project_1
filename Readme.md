@@ -75,3 +75,8 @@ Latency Spike	                    Triggers if any service takes >2 seconds.
 Pod CrashLoop	                    Triggers if any service is restarting.
 OOMKilled	                        Triggers if any service runs out of memory.
 Disk/PVC Full	                    Triggers if any service's storage is >90%.
+
+
+
+kubectl port-forward -n monitoring \
+  svc/monitoring-kube-prometheus-prometheus 9090:9090
