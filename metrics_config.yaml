@@ -48,8 +48,8 @@ metrics:
     unit: bytes
     layer: container
     normal_min: 200_000_000
-    normal_max: 2_000_000_000
-    normal_std_pct: 15
+    normal_max: 4_000_000_000
+    normal_std_pct: 20
     higher_is_bad: true
 
   - name: aiops:container_cpu_throttle_ratio
@@ -115,6 +115,6 @@ metrics:
     unit: count
     layer: pipeline
     normal_min: 0.0
-    normal_max: 0.0
-    normal_std_pct: 5
+    normal_max: 2.0  # Allow up to 2 failures before screaming "Anomaly"
+    normal_std_pct: 50 # Increase the 'slack'
     higher_is_bad: true

@@ -91,7 +91,19 @@ class MetricSpec:
         if self.unit == "ratio":   return f"{value:.4f}"
         return f"{value:.4f}"
 
+    @staticmethod
+    def prepare_for_lstm(df, metric_name):
+        if df is None or df.empty:
+            print(f"DEBUG: {metric_name} returned NO data.")
+            return None
 
+        # Change: Check if all values in the entire snapshot are 0
+        # or check a specific column if you are passing just one series
+        if (df == 0).all().all():
+            print(f"DEBUG: Data is currently all 0.0 (Healthy/Idle). Skipping AI.")
+            return None
+
+        return df
 class MetricRegistry:
     """
     Central registry. Load once, use everywhere.
@@ -175,6 +187,10 @@ class MetricRegistry:
         })
         print(f"  Synthetic baseline: {df.shape[0]} rows x {df.shape[1]} metrics")
         return df
+
+
+
+
 
     def print_summary(self):
         print(f"\n{'─'*65}")

@@ -37,8 +37,9 @@ spec:
         - record: aiops:container_cpu_throttle_ratio
           expr: >
             (
-              sum(rate(container_cpu_cfs_throttled_seconds_total{container!=""}[5m]))
-              / sum(rate(container_cpu_cfs_periods_total{container!=""}[5m]))
+              (sum(rate(container_cpu_cfs_throttled_periods_total{container!=""}[5m])) or vector(0))
+              / 
+              (sum(rate(container_cpu_cfs_periods_total{container!=""}[5m])) > 0)
             ) or vector(0)
 
         - record: aiops:container_oom_kills

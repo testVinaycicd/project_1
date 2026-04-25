@@ -7,7 +7,7 @@ import numpy as np
 app = FastAPI()
 
 # Load model
-with open('models/churn_model.pkl', 'rb') as f:
+with open('../models/churn_model.pkl', 'rb') as f:
     model = pickle.load(f)
 
 class CustomerData(BaseModel):

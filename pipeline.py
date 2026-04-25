@@ -61,7 +61,7 @@ def train_op(
 ):
     import subprocess, sys
     result = subprocess.run(
-        [sys.executable, "/app/train.py",
+        [sys.executable, "/app/training/train.py",
          data.path, model.path, metrics.path],
         capture_output=True, text=True,
     )

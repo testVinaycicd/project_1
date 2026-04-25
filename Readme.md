@@ -77,6 +77,41 @@ OOMKilled	                        Triggers if any service runs out of memory.
 Disk/PVC Full	                    Triggers if any service's storage is >90%.
 
 
+day 1
+# 1. Replace your old flat files with this new folder structure
+# 2. Port-forward MinIO and seed data:
+kubectl port-forward -n kubeflow svc/minio-service 9000:9000 &
+python training/generate_data.py
+python seed_minio.py
 
+# 3. Rebuild and push your Docker image (train.py path changed):
+docker build -t crysis307/churn-train:v10 -f infra/Dockerfile .
+docker push crysis307/churn-train:v10
+
+# 4. Update BASE_IMAGE in pipeline.py to v10, then submit:
+kubectl port-forward -n kubeflow svc/ml-pipeline-ui 8080:80 &
+python pipeline/pipeline.py
+
+# 5. Watch the pipeline run all 6 steps in the Kubeflow UI
+
+# 6. Commit everything:
+git init && git add . && git commit -m "Day 1: fix pipeline, iforest, restructure repo"
+
+
+day 2
+
+
+# Port-forward Prometheus
 kubectl port-forward -n monitoring \
-  svc/monitoring-kube-prometheus-prometheus 9090:9090
+svc/monitoring-kube-prometheus-prometheus 9090:9090 &
+
+
+
+# Step 1: Train on real Prometheus history, save models
+python ensemble_engine.py --mode train
+
+# Step 2: See the comparison report (great for demos)
+python ensemble_engine.py --mode compare
+
+# Step 3: Start the live detection loop
+python ensemble_engine.py --mode run
