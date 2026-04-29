@@ -38,20 +38,37 @@ from prom_client import PrometheusClient
 from iforest_detector import IsolationForestDetector
 from lstm_detecter import LSTMDetector
 
+import requests
+from datetime import datetime, timezone
+
+from prometheus_client import Gauge, start_http_server
+
 # ─────────────────────────────────────────────────────────────────
 # CONFIG
 # ─────────────────────────────────────────────────────────────────
 PROM_URL           = "http://localhost:9090"
 POLL_INTERVAL_SEC  = 30
 ALERT_COOLDOWN_SEC = 120
-BASELINE_HOURS     = 0.5
+BASELINE_HOURS     = 20
 BASELINE_STEP_SEC  = 30
 VOTING             = "all"     # "any" | "all" | "majority"
 
 MODEL_DIR          = Path("models")
 IF_PATH            = MODEL_DIR / "iforest_detector.joblib"
 LSTM_PATH          = MODEL_DIR / "lstm_detector.pt"
+ALERTMANAGER_URL = "http://localhost:9093/api/v2/alerts"
+METRICS_PORT = 8000
 
+
+
+# ─────────────────────────────────────────────────────────────────
+# PROMETHEUS METRICS
+# ─────────────────────────────────────────────────────────────────
+ml_severity      = Gauge("ml_anomaly_severity",  "Ensemble anomaly severity 0-1")
+ml_active        = Gauge("ml_anomaly_active",     "1 if ANOMALY 0 if NORMAL")
+ml_if_anomaly    = Gauge("ml_iforest_anomaly",    "1 if IsolationForest says ANOMALY")
+ml_lstm_anomaly  = Gauge("ml_lstm_anomaly",       "1 if LSTM says ANOMALY")
+ml_votes         = Gauge("ml_anomaly_votes",      "Detectors voting ANOMALY")
 
 # ─────────────────────────────────────────────────────────────────
 # ENSEMBLE
@@ -68,8 +85,8 @@ class EnsembleDetector:
 
     def __init__(self, voting: str = VOTING):
         self.voting  = voting
-        self.iforest = IsolationForestDetector(contamination=0.05, n_estimators=200)
-        self.lstm    = LSTMDetector(seq_len=20, hidden_dim=64, epochs=50)
+        self.iforest = IsolationForestDetector(contamination=0.03, n_estimators=200)
+        self.lstm    = LSTMDetector(seq_len=10, hidden_dim=64, epochs=50, threshold_sigma=5.0)
         self.is_fitted = False
 
     def fit(self, baseline: pd.DataFrame) -> "EnsembleDetector":
@@ -85,6 +102,27 @@ class EnsembleDetector:
     def predict(self, snapshot: pd.DataFrame) -> dict:
         if_result   = self.iforest.predict(snapshot)
         lstm_result = self.lstm.update_and_predict(snapshot)
+
+        # ── NEW: suppress weak IF signals ──────────────────────────
+        IF_MIN_SEVERITY = 0.15   # tune this — ignore IF if sev < 0.15
+        if if_result["status"] == "ANOMALY" and if_result.get("severity", 0) < IF_MIN_SEVERITY:
+            if_result = dict(if_result, status="NORMAL")   # downgrade, don't mutate original
+            # ───────────────────────────────────────────────────────────
+        # valid_snapshot = REGISTRY.get_spec("aiops:container_cpu_throttle_ratio").prepare_for_lstm(
+        #     snapshot, "Ensemble-Precheck"
+        # )
+        #
+        # if valid_snapshot is not None:
+        #     # Data is real/active — run LSTM
+        #     lstm_result = self.lstm.update_and_predict(snapshot)
+        # else:
+        #     # Data is 0.0 or empty — Force LSTM to stay 'NORMAL' to avoid false alerts
+        #     lstm_result = {
+        #         "status": "NORMAL",
+        #         "reconstruction_error": 0.0,
+        #         "threshold": 0.1, # Use your model's default
+        #         "severity": 0.0
+        #     }
 
         # Collect votes (skip WARMING_UP)
         active = [
@@ -108,14 +146,20 @@ class EnsembleDetector:
         else:  # majority
             verdict = "ANOMALY" if n_anomaly > n_total / 2 else "NORMAL"
 
-        severities = [r.get("severity", 0.0) for r in [if_result, lstm_result]]
+        # ── FIX: severity = 0 when verdict is NORMAL ──────────────
+        if verdict == "NORMAL":
+            severity = 0.0
+        else:
+            severities = [r.get("severity", 0.0) for r in [if_result, lstm_result]]
+            severity = round(max(severities), 3)
+            # ──────────────────────────────────────────────────────────
 
         return {
             "verdict":          verdict,
             "voting":           self.voting,
             "n_anomaly_votes":  n_anomaly,
             "n_votes":          n_total,
-            "severity":         round(max(severities), 3),
+            "severity":         severity,
             "if_result":        if_result,
             "lstm_result":      lstm_result,
         }
@@ -252,6 +296,12 @@ def live_loop(ensemble: EnsembleDetector, client: PrometheusClient):
     print(f"   Cooldown  : {ALERT_COOLDOWN_SEC}s")
     print(f"   LSTM warmup: {warmup_steps} polls = {warmup_steps * POLL_INTERVAL_SEC}s\n")
 
+    # ADD: skip first 2 polls to let metrics stabilize
+    print("  Stabilizing — skipping first 2 polls...")
+    for _ in range(2):
+        client.fetch_snapshot()
+        time.sleep(POLL_INTERVAL_SEC)
+
     while True:
         try:
             ts       = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -261,6 +311,14 @@ def live_loop(ensemble: EnsembleDetector, client: PrometheusClient):
             sev      = result["severity"]
             if_st    = result["if_result"]["status"]
             lstm_st  = result["lstm_result"]["status"]
+
+
+            ml_severity.set(sev)
+            ml_active.set(1 if verdict == "ANOMALY" else 0)
+            ml_if_anomaly.set(1 if if_st == "ANOMALY" else 0)
+            ml_lstm_anomaly.set(1 if lstm_st == "ANOMALY" else 0)
+            ml_votes.set(result["n_anomaly_votes"])
+
 
             print(
                 f"[{ts}]  Ensemble: {_badge(verdict):14}  "
@@ -281,6 +339,24 @@ def live_loop(ensemble: EnsembleDetector, client: PrometheusClient):
         time.sleep(POLL_INTERVAL_SEC)
 
 
+# def _fire_alert(result: dict):
+#     global _last_alert
+#     now = time.time()
+#     if (now - _last_alert) < ALERT_COOLDOWN_SEC:
+#         remaining = int(ALERT_COOLDOWN_SEC - (now - _last_alert))
+#         print(f"  🤫 Alert muted — {remaining}s cooldown remaining")
+#         return
+#
+#     if_r = result["if_result"]
+#     print("\n" + "!" * 60)
+#     print("🚨 ENSEMBLE ANOMALY ALERT")
+#     print(f"   Verdict  : {result['verdict']}")
+#     print(f"   Severity : {_bar(result['severity'])}")
+#     print(f"   IF culprit: {if_r.get('top_culprit', 'N/A')}")
+#     print("   → SRE notified (webhook goes here on Day 5)")
+#     print("!" * 60 + "\n")
+#     _last_alert = now
+
 def _fire_alert(result: dict):
     global _last_alert
     now = time.time()
@@ -289,16 +365,46 @@ def _fire_alert(result: dict):
         print(f"  🤫 Alert muted — {remaining}s cooldown remaining")
         return
 
-    if_r = result["if_result"]
+    if_r   = result["if_result"]
+    sev    = result["severity"]
+    culprit = if_r.get("top_culprit", "N/A")
+
     print("\n" + "!" * 60)
     print("🚨 ENSEMBLE ANOMALY ALERT")
-    print(f"   Verdict  : {result['verdict']}")
-    print(f"   Severity : {_bar(result['severity'])}")
-    print(f"   IF culprit: {if_r.get('top_culprit', 'N/A')}")
-    print("   → SRE notified (webhook goes here on Day 5)")
+    print(f"   Severity  : {_bar(sev)}")
+    print(f"   IF culprit: {culprit}")
+
+    # ── Real webhook to AlertManager ──────────────────────────────
+    payload = [{
+        "labels": {
+            "alertname": "MLAnomalyDetected",
+            "severity":  "critical" if sev >= 0.7 else "warning",
+            "source":    "ensemble_engine",
+            "culprit":   str(culprit),
+        },
+        "annotations": {
+            "summary":     f"ML anomaly — severity {sev:.0%}",
+            "description": (
+                f"IF={if_r['status']} | "
+                f"LSTM={result['lstm_result']['status']} | "
+                f"votes={result['n_anomaly_votes']}/{result['n_votes']} | "
+                f"top culprit={culprit}"
+            ),
+        },
+        "startsAt": datetime.now(timezone.utc).isoformat(),
+    }]
+
+    try:
+        resp = requests.post(ALERTMANAGER_URL, json=payload, timeout=5)
+        resp.raise_for_status()
+        print(f"   🔔 AlertManager → {resp.status_code} OK")
+    except requests.exceptions.ConnectionError:
+        print("   ⚠️  AlertManager unreachable — is port-forward running?")
+    except Exception as e:
+        print(f"   ⚠️  Alert failed: {e}")
+
     print("!" * 60 + "\n")
     _last_alert = now
-
 
 # ─────────────────────────────────────────────────────────────────
 # DISPLAY HELPERS
@@ -346,6 +452,8 @@ def main():
             print("❌ No saved models. Run --mode train first.")
             sys.exit(1)
         ensemble = EnsembleDetector.load()
+        start_http_server(METRICS_PORT)
+        print(f"📡 Metrics → http://localhost:{METRICS_PORT}/metrics")
         live_loop(ensemble, client)
 
     elif args.mode == "compare":

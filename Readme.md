@@ -105,13 +105,12 @@ day 2
 kubectl port-forward -n monitoring \
 svc/monitoring-kube-prometheus-prometheus 9090:9090 &
 
+# Port-forward Alertmanager
+kubectl port-forward svc/monitoring-kube-prometheus-alertmanager 9093:9093 -n monitoring
 
 
 # Step 1: Train on real Prometheus history, save models
-python ensemble_engine.py --mode train
+python Ensemble_engine.py --mode train
+python Ensemble_engine.py --mode run
 
-# Step 2: See the comparison report (great for demos)
-python ensemble_engine.py --mode compare
-
-# Step 3: Start the live detection loop
-python ensemble_engine.py --mode run
+python Ensemble_engine.py --mode compare

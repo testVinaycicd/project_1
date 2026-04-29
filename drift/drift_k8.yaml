@@ -1,0 +1,155 @@
+# ═══════════════════════════════════════════════════════════════
+# drift_k8s.yaml — Kubernetes manifests for the drift system
+# Apply with: kubectl apply -f infra/drift_k8s.yaml
+# ═══════════════════════════════════════════════════════════════
+#
+# THREE RESOURCES:
+#
+# 1. Service (drift-metrics-service)
+#    Exposes the drift_server.py /metrics endpoint as a
+#    Kubernetes Service so Prometheus can discover and scrape it.
+#    When running drift_server.py locally (port-forwarded),
+#    this isn't strictly needed. For in-cluster deployment it is.
+#
+# 2. ServiceMonitor (drift-metrics-monitor)
+#    Tells Prometheus Operator to scrape the drift metrics service.
+#    The label release=monitoring must match your kube-prometheus-stack
+#    helm release name (check: helm list -n monitoring).
+#
+# 3. PrometheusRule (drift-alert-rules)
+#    Defines alert conditions. AlertManager fires these.
+#    Two alerts:
+#      a. ModelDataDriftDetected  → data drift score above threshold
+#      b. ModelConceptDriftDetected → concept drift detected
+#    Both send webhooks to drift_trigger.py.
+#
+# FOR LOCAL MINIKUBE TESTING:
+#   You don't need to apply this file to test drift detection.
+#   Run drift_server.py locally, port-forward Prometheus,
+#   and manually scrape http://localhost:8765/metrics to verify.
+#   Apply this file when you want full in-cluster operation.
+# ═══════════════════════════════════════════════════════════════
+
+---
+# 1. Service — exposes drift_server.py to Prometheus
+apiVersion: v1
+kind: Service
+metadata:
+  name: drift-metrics-service
+  namespace: monitoring
+  labels:
+    app: churn-drift-detector
+    prometheus-scrape: "true"
+spec:
+  type: ClusterIP
+  ports:
+    - name: metrics
+      port: 8765
+      targetPort: 8765
+      protocol: TCP
+  selector:
+    app: churn-drift-detector
+
+---
+# 2. ServiceMonitor — Prometheus scrapes the drift service
+# This is the PULL model: Prometheus discovers this via ServiceMonitor
+# and pulls /metrics every 30 seconds.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: drift-metrics-monitor
+  namespace: monitoring
+  labels:
+    release: monitoring    # Must match your kube-prometheus-stack release name
+spec:
+  selector:
+    matchLabels:
+      prometheus-scrape: "true"
+  namespaceSelector:
+    matchNames:
+      - monitoring
+  endpoints:
+    - port: metrics
+      interval: 30s          # Pull every 30 seconds
+      path: /metrics         # Our drift_server.py exposes this
+
+---
+# 3. PrometheusRule — drift alert definitions
+# AlertManager fires these when conditions are met.
+# Webhooks are sent to drift_trigger.py which calls KFP.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: drift-alert-rules
+  namespace: monitoring
+  labels:
+    release: monitoring
+spec:
+  groups:
+    - name: churn.drift.rules
+      rules:
+
+        # DATA DRIFT ALERT
+        # Fires when more than 40% of features have drifted
+        # for: 5m means it must be true for 5 minutes (avoids flapping)
+        - alert: ModelDataDriftDetected
+          expr: churn_model_data_drift_score > 0.4
+          for: 5m
+          labels:
+            severity: warning
+            team: mlops
+          annotations:
+            summary: "Churn model data drift detected"
+            description: >
+              Data drift score is {{ $value | humanize }} (threshold: 0.4).
+              Input feature distributions have shifted from training baseline.
+              Retraining recommended.
+            drift_score: "{{ $value }}"
+            runbook: "http://localhost:8766/retrain"
+
+        # CONCEPT DRIFT ALERT
+        # Fires when prediction distribution has shifted significantly
+        - alert: ModelConceptDriftDetected
+          expr: churn_model_concept_drift_detected == 1
+          for: 5m
+          labels:
+            severity: warning
+            team: mlops
+          annotations:
+            summary: "Churn model concept drift detected"
+            description: >
+              Model prediction distribution has shifted significantly.
+              This may indicate the relationship between features and
+              churn behaviour has changed. Retraining required.
+            drift_score: "{{ $value }}"
+
+        # SEVERE DRIFT ALERT
+        # Fires when overall drift score is critical
+        - alert: ModelDriftCritical
+          expr: churn_model_overall_drift_score > 0.7
+          for: 2m
+          labels:
+            severity: critical
+            team: mlops
+          annotations:
+            summary: "CRITICAL: Churn model drift is severe"
+            description: >
+              Overall drift score is {{ $value | humanize }}.
+              Both data and concept drift may be present.
+              Immediate retraining required.
+            drift_score: "{{ $value }}"
+
+        # NO DATA ALERT
+        # Fires when drift detector hasn't received production traffic
+        - alert: DriftDetectorNoProductionData
+          expr: churn_model_production_samples_count < 50
+          for: 30m
+          labels:
+            severity: info
+            team: mlops
+          annotations:
+            summary: "Drift detector has insufficient production data"
+            description: >
+              Only {{ $value }} production samples logged.
+              Drift detection requires at least 50 samples.
+              Check that the inference API is logging requests.

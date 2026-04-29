@@ -1,0 +1,5 @@
+- job_name: 'ensemble-engine'
+  static_configs:
+    - targets: ['172.18.0.1:8000']
+  metrics_path: /metrics
+  scrape_interval: 30s

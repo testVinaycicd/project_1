@@ -1,0 +1,148 @@
+# ═══════════════════════════════════════════════════════════════
+# drift_config.yaml — Declarative drift detection configuration
+# ═══════════════════════════════════════════════════════════════
+#
+# WHAT THIS FILE CONTROLS:
+#   Everything about how drift is detected, measured, and acted on.
+#   Add a feature here → it is monitored automatically.
+#   Change a threshold here → detection sensitivity changes.
+#   Zero code changes needed.
+#
+# TWO KINDS OF DRIFT:
+#
+#   DATA DRIFT (covariate shift):
+#     The distribution of INPUT features changes.
+#     Example: customers are getting younger on average.
+#             monthly_charges are creeping up industry-wide.
+#     Detection: statistical test (KS test) comparing training vs
+#                current prediction request distributions.
+#     Risk: model was trained on different data → predictions degrade.
+#
+#   CONCEPT DRIFT (model performance degradation):
+#     The RELATIONSHIP between inputs and outputs changes.
+#     Example: what used to predict churn no longer does.
+#             High support calls used to = churn, now customers
+#             call to upgrade, not complain.
+#     Detection: monitor the model's prediction distribution over time.
+#                If churn_probability mean shifts significantly,
+#                the model is seeing a different world.
+#     Risk: model predictions become systematically wrong.
+#
+# ═══════════════════════════════════════════════════════════════
+
+storage:
+  minio_endpoint: "http://localhost:9000"       # port-forwarded locally
+  minio_endpoint_cluster: "http://minio-service.kubeflow:9000"
+  minio_access_key: "minio"
+  minio_secret_key: "minio123"
+  bucket: "mlpipeline"
+  reference_data_key: "churn/drift/reference_data.parquet"
+  production_log_key:  "churn/drift/production_log.parquet"
+
+detection:
+  # How often the drift detector wakes up and checks
+  check_interval_seconds: 300    # every 5 minutes
+
+  # Minimum production samples required before running drift check
+  # (don't compare 5 samples to 1000 — statistical tests need volume)
+  min_production_samples: 50
+
+  # How many recent production requests to compare against reference
+  # (sliding window — prevents accumulation of old data)
+  production_window_size: 200
+
+data_drift:
+  # Statistical test: KS (Kolmogorov-Smirnov) for numerical features
+  # KS test returns a p-value: p < threshold → distributions differ
+  # Lower p_value_threshold = harder to trigger (more conservative)
+  # Higher p_value_threshold = easier to trigger (more sensitive)
+  p_value_threshold: 0.05        # industry standard for significance
+
+  # If this fraction of features have drifted → dataset is drifted
+  # 0.5 = more than half of features must drift to flag dataset drift
+  dataset_drift_threshold: 0.5
+
+  # Per-feature drift score above this → flag that feature as drifted
+  # Evidently returns a normalised [0,1] score (higher = more drift)
+  feature_drift_threshold: 0.3
+
+  # Features to monitor for data drift
+  # These MUST match the columns in your training data
+  features:
+    - name: age
+      type: numerical
+      description: "Customer age in years"
+      expected_min: 18
+      expected_max: 70
+
+    - name: tenure_months
+      type: numerical
+      description: "Months the customer has been with us"
+      expected_min: 1
+      expected_max: 72
+
+    - name: monthly_charges
+      type: numerical
+      description: "Monthly subscription charge in USD"
+      expected_min: 20.0
+      expected_max: 120.0
+
+    - name: total_charges
+      type: numerical
+      description: "Total lifetime charges in USD"
+      expected_min: 100.0
+      expected_max: 8000.0
+
+    - name: num_support_calls
+      type: numerical
+      description: "Number of support calls in last 90 days"
+      expected_min: 0
+      expected_max: 10
+
+concept_drift:
+  # Monitor the model's OUTPUT distribution, not its inputs
+  # We track churn_probability (the model's confidence) over time
+  # If the mean predicted probability shifts by more than this → flag
+  prediction_shift_threshold: 0.10    # 10% shift in mean prediction
+
+  # If std dev of predictions drops below this → model is "stuck"
+  # (e.g. always predicting 0.5 — lost discriminative power)
+  min_prediction_std: 0.05
+
+  # Column name in your production log that holds model predictions
+  prediction_column: "churn_probability"
+
+prometheus:
+  # The drift server exposes /metrics on this port
+  # Prometheus scrapes it via ServiceMonitor
+  metrics_port: 8765
+
+  # Metric names that appear in Prometheus / Grafana
+  metric_prefix: "churn_model"
+
+  # These become Prometheus Gauges:
+  #   churn_model_data_drift_score          (0.0 = no drift, 1.0 = maximum)
+  #   churn_model_drifted_features_count    (integer count)
+  #   churn_model_dataset_drift_detected    (0 or 1 boolean)
+  #   churn_model_concept_drift_score       (prediction shift magnitude)
+  #   churn_model_concept_drift_detected    (0 or 1 boolean)
+  #   churn_model_production_samples_count  (how many requests logged)
+  #   churn_model_last_check_timestamp      (unix timestamp of last check)
+
+alerting:
+  # drift_server.py sends webhook to drift_trigger.py
+  # drift_trigger.py calls KFP to create a new pipeline run
+  trigger_webhook_url: "http://localhost:8766/retrain"
+
+  # Only trigger retraining if drift score is above this
+  # (avoid retraining on tiny, insignificant drift)
+  min_drift_score_for_retraining: 0.4
+
+  # Don't retrain more than once per this many hours
+  # (prevents runaway retraining loops)
+  retraining_cooldown_hours: 4
+
+kubeflow:
+  host: "http://127.0.0.1:8080"
+  pipeline_name: "churn-train-pipeline"
+  run_name_prefix: "drift-triggered-retrain"

@@ -83,12 +83,6 @@ class PrometheusClient:
             hours_back: float,
             step_seconds: int,
     ) -> pd.Series:
-        """
-        Range query — time series of values over last N hours.
-        Recording rules have been running since the PrometheusRule
-        was applied, so history depth = time since you ran:
-          kubectl apply -f prometheusrule.yaml
-        """
         now = time.time()
         start = now - (hours_back * 3600)
         try:
@@ -107,11 +101,11 @@ class PrometheusClient:
             if not results:
                 return pd.Series(dtype=float)
             pairs = results[0]["values"]
-            timestamps = [
-                datetime.fromtimestamp(float(p[0]), tz=timezone.utc)
-                for p in pairs
-            ]
-            return pd.Series([float(p[1]) for p in pairs], index=timestamps)
+
+            # ← FIX: use positional index, not timestamps
+            # Timestamps differ per metric by microseconds → causes 392-row explosion
+            return pd.Series([float(p[1]) for p in pairs])  # no index= argument
+
         except Exception as e:
             print(f"  Range error [{promql}]: {e}")
             return pd.Series(dtype=float)
@@ -120,11 +114,17 @@ class PrometheusClient:
     def fetch_snapshot(self) -> pd.DataFrame:
         row = {}
         for spec in REGISTRY.all_specs:
-            # Use normal_mean as default, not 0.0
-            # Keeps snapshot consistent with how baseline was filled
             value = self._instant(spec.promql, default=spec.normal_mean)
             row[spec.name] = value
-        return pd.DataFrame([row])[REGISTRY.feature_names]
+        df = pd.DataFrame([row])[REGISTRY.feature_names]
+
+        # Match noise floor applied during training
+        # Keeps train/inference distribution consistent
+        for col in df.columns:
+            if df[col].iloc[0] == 0.0:
+                df[col] = df[col] + abs(np.random.normal(0, 0.001))
+
+        return df
 
     def fetch_baseline(
             self,
@@ -166,10 +166,35 @@ class PrometheusClient:
 
         before = len(df)
 
+        # ADD THIS before the balancing section
+        # print("\n--- RAW DATA STATS (before balancing) ---")
+        # for col in df.columns:
+        #     print(f"  {col.split(':')[1]:<35} mean={df[col].mean():.2f}  pts={df[col].count()}")
+        # print("-------------------------------------------\n")
 
+        # Add noise floor to zero-variance columns
+        zero_cols = [c for c in df.columns if df[c].std() < 0.001]
+        for col in zero_cols:
+            df[col] = df[col] + np.random.normal(0, 0.001, len(df))
+            df[col] = df[col].clip(lower=0)
+        if zero_cols:
+            print(f"  Noise floor added to {len(zero_cols)} zero-variance cols: {zero_cols}")
+
+        # Balance idle vs active rows so IF learns both states equally
+        net_col = 'aiops:net_receive_bytes_rate'
+        idle_mask  = df[net_col] < df[net_col].quantile(0.3)
+        active_mask = ~idle_mask
+        idle_rows   = df[idle_mask]
+        active_rows = df[active_mask]
+        target = max(len(idle_rows), len(active_rows))
+        if len(idle_rows) < len(active_rows):
+            idle_rows = idle_rows.sample(target, replace=True, random_state=42)
+        else:
+            active_rows = active_rows.sample(target, replace=True, random_state=42)
+        df = pd.concat([idle_rows, active_rows]).sample(frac=1, random_state=42)
+        print(f"  Balanced: {len(idle_rows)} idle + {len(active_rows)} active rows")
 
         df = df.reset_index(drop=True)[REGISTRY.feature_names]
-        print(f"\n  Baseline ready: {df.shape[0]} rows x {df.shape[1]} features")
         return df
 
     def print_live_readings(self):

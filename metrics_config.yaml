@@ -52,21 +52,21 @@ metrics:
     normal_std_pct: 20
     higher_is_bad: true
 
-  - name: aiops:container_cpu_throttle_ratio
-    unit: ratio
-    layer: container
-    normal_min: 0.0
-    normal_max: 0.05
-    normal_std_pct: 20
-    higher_is_bad: true
+#  - name: aiops:container_cpu_throttle_ratio
+#    unit: ratio
+#    layer: container
+#    normal_min: 0.0
+#    normal_max: 0.05
+#    normal_std_pct: 20
+#    higher_is_bad: true
 
-  - name: aiops:container_oom_kills
-    unit: count
-    layer: container
-    normal_min: 0.0
-    normal_max: 0.0
-    normal_std_pct: 5
-    higher_is_bad: true
+#  - name: aiops:container_oom_kills
+#    unit: count
+#    layer: container
+#    normal_min: 0.0
+#    normal_max: 0.0
+#    normal_std_pct: 5
+#    higher_is_bad: true
 
   # ── WORKLOAD ──────────────────────────────────────────
   - name: aiops:pod_restart_rate
@@ -111,10 +111,10 @@ metrics:
     higher_is_bad: true
 
   # ── PIPELINE ──────────────────────────────────────────
-  - name: aiops:argo_failed_workflows
-    unit: count
-    layer: pipeline
-    normal_min: 0.0
-    normal_max: 2.0  # Allow up to 2 failures before screaming "Anomaly"
-    normal_std_pct: 50 # Increase the 'slack'
-    higher_is_bad: true
+#  - name: aiops:argo_failed_workflows
+#    unit: count
+#    layer: pipeline
+#    normal_min: 0.0
+#    normal_max: 2.0  # Allow up to 2 failures before screaming "Anomaly"
+#    normal_std_pct: 50 # Increase the 'slack'
+#    higher_is_bad: true

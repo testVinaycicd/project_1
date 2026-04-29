@@ -30,8 +30,8 @@ spec:
       rules:
         - record: aiops:container_mem_bytes
           expr: >
-            sum(container_memory_usage_bytes{
-              namespace="kubeflow", container!="", container!="POD"
+            max(container_memory_usage_bytes{
+              namespace="kubeflow", container!="", container!="POD", container!="mysql", container!="minio"
             })
 
         - record: aiops:container_cpu_throttle_ratio
@@ -68,20 +68,37 @@ spec:
       rules:
         - record: aiops:net_receive_bytes_rate
           expr: >
-            sum(rate(node_network_receive_bytes_total{
-              device!~"lo|veth.*|docker.*|flannel.*|cali.*|cilium.*"
-            }[5m]))
+            sum(rate(node_network_receive_bytes_total{device="eth0"}[5m]))
+        
 
         - record: aiops:net_transmit_bytes_rate
           expr: >
-            sum(rate(node_network_transmit_bytes_total{
-              device!~"lo|veth.*|docker.*|flannel.*|cali.*|cilium.*"
-            }[5m]))
+            sum(rate(node_network_transmit_bytes_total{device="eth0"}[5m]))
+            
 
-    - name: aiops.pipeline
-      interval: 30s
+    - name: ml.anomaly.alerts
       rules:
-        - record: aiops:argo_failed_workflows
-          expr: >
-            sum(argo_workflows_gauge{namespace="kubeflow", status="Failed"})
-            or vector(0)
+        - alert: MLAnomalyDetected
+          expr: ml_anomaly_severity > 0.5
+          for: 0m
+          labels:
+            severity: critical
+          annotations:
+            summary: "ML anomaly detected"
+            description: "Severity {{ $value | humanizePercentage }} — ensemble engine flagged an anomaly. Culprit metric needs investigation."
+
+        - alert: MLAnomalyWarning
+          expr: ml_anomaly_severity > 0.3
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: "ML anomaly warning"
+            description: "Severity {{ $value | humanizePercentage }} — elevated anomaly score for 2 minutes."
+#    - name: aiops.pipeline
+#      interval: 30s
+#      rules:
+#        - record: aiops:argo_failed_workflows
+#          expr: >
+#            sum(argo_workflows_gauge{namespace="kubeflow", status="Failed"})
+#            or vector(0)
