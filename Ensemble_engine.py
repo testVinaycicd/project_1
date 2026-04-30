@@ -43,6 +43,9 @@ from datetime import datetime, timezone
 
 from prometheus_client import Gauge, start_http_server
 
+from drift_detector import DriftDetector
+
+
 # ─────────────────────────────────────────────────────────────────
 # CONFIG
 # ─────────────────────────────────────────────────────────────────
@@ -51,7 +54,7 @@ POLL_INTERVAL_SEC  = 30
 ALERT_COOLDOWN_SEC = 120
 BASELINE_HOURS     = 20
 BASELINE_STEP_SEC  = 30
-VOTING             = "all"     # "any" | "all" | "majority"
+VOTING             = "majority"     # "any" | "all" | "majority"
 
 MODEL_DIR          = Path("models")
 IF_PATH            = MODEL_DIR / "iforest_detector.joblib"
@@ -69,6 +72,14 @@ ml_active        = Gauge("ml_anomaly_active",     "1 if ANOMALY 0 if NORMAL")
 ml_if_anomaly    = Gauge("ml_iforest_anomaly",    "1 if IsolationForest says ANOMALY")
 ml_lstm_anomaly  = Gauge("ml_lstm_anomaly",       "1 if LSTM says ANOMALY")
 ml_votes         = Gauge("ml_anomaly_votes",      "Detectors voting ANOMALY")
+ml_drift_psi    = Gauge("ml_drift_psi",    "Mean PSI drift score across all features 0=stable")
+ml_drift_active = Gauge("ml_drift_active", "1 if data drift detected vs training baseline")
+
+ml_drift_feature_psi = Gauge(
+    "ml_drift_feature_psi",
+    "PSI drift score per feature",
+    labelnames=["feature"],
+)
 
 # ─────────────────────────────────────────────────────────────────
 # ENSEMBLE
@@ -144,7 +155,7 @@ class EnsembleDetector:
             else:
                 verdict = "ANOMALY" if n_anomaly == n_total and n_total > 0 else "NORMAL"
         else:  # majority
-            verdict = "ANOMALY" if n_anomaly > n_total / 2 else "NORMAL"
+            verdict = "ANOMALY" if n_anomaly >=( n_total / 2) else "NORMAL"
 
         # ── FIX: severity = 0 when verdict is NORMAL ──────────────
         if verdict == "NORMAL":
@@ -296,7 +307,20 @@ def live_loop(ensemble: EnsembleDetector, client: PrometheusClient):
     print(f"   Cooldown  : {ALERT_COOLDOWN_SEC}s")
     print(f"   LSTM warmup: {warmup_steps} polls = {warmup_steps * POLL_INTERVAL_SEC}s\n")
 
-    # ADD: skip first 2 polls to let metrics stabilize
+    # ── NEW: initialise drift detector from saved reference ───────
+    drift_ref_path = "models/drift_reference.json"
+    try:
+        drift = DriftDetector.load(drift_ref_path)
+        print(f"📊 Drift detector loaded ← {drift_ref_path}")
+    except FileNotFoundError:
+        # Fallback: build from IsolationForest training stats
+        # This works but uses synthetic reference (less accurate than real baseline samples)
+        drift = DriftDetector.from_training_stats(ensemble.iforest.training_stats)
+        print("📊 Drift detector initialised from IForest training stats")
+        print("   (Run --mode train to save real baseline samples for better accuracy)")
+    # ─────────────────────────────────────────────────────────────
+
+    # Stabilise — skip first 2 polls
     print("  Stabilizing — skipping first 2 polls...")
     for _ in range(2):
         client.fetch_snapshot()
@@ -307,24 +331,57 @@ def live_loop(ensemble: EnsembleDetector, client: PrometheusClient):
             ts       = time.strftime("%Y-%m-%d %H:%M:%S")
             snap     = client.fetch_snapshot()
             result   = ensemble.predict(snap)
+            result   = ensemble.predict(snap)
+            print(f"  DEBUG: voting={result['voting']} n_anomaly={result['n_anomaly_votes']} n_total={result['n_votes']} verdict={result['verdict']} sev={result['severity']}")  # ← add this
             verdict  = result["verdict"]
             sev      = result["severity"]
             if_st    = result["if_result"]["status"]
             lstm_st  = result["lstm_result"]["status"]
 
-
+            # Existing Gauges — unchanged
             ml_severity.set(sev)
             ml_active.set(1 if verdict == "ANOMALY" else 0)
             ml_if_anomaly.set(1 if if_st == "ANOMALY" else 0)
             ml_lstm_anomaly.set(1 if lstm_st == "ANOMALY" else 0)
             ml_votes.set(result["n_anomaly_votes"])
 
+            # ── NEW: drift observation and reporting ──────────────
+            drift.observe(snap)
+            drift_report = drift.report()
+
+            # Push drift gauges
+            ml_drift_psi.set(drift_report["overall_psi"])
+            ml_drift_active.set(1 if drift_report["status"] == "DRIFTING" else 0)
+            for feat in drift_report.get("features", {}):
+                ml_drift_feature_psi.labels(feature=feat).set(
+                    drift_report["features"][feat]["psi"]
+                )
+
+            # Print drift report every 10 polls (every 5 minutes at 30s interval)
+            # so terminal doesn't spam but you still see drift status
+            if hasattr(live_loop, "_poll_count"):
+                live_loop._poll_count += 1
+            else:
+                live_loop._poll_count = 1
+
+            if live_loop._poll_count % 10 == 0:
+                drift.print_report(drift_report)
+
+            # ─────────────────────────────────────────────────────
+
+            drift_flag = ""
+            if drift_report["status"] == "DRIFTING":
+                drift_flag = "  📉DRIFT"
+            elif drift_report["status"] == "WARN":
+                drift_flag = "  ⚠️ drift"
 
             print(
                 f"[{ts}]  Ensemble: {_badge(verdict):14}  "
                 f"IF: {_badge(if_st):10}  "
                 f"LSTM: {_badge(lstm_st):14}  "
-                f"Sev: {sev:.2f}"
+                f"Sev: {sev:.2f}  "
+                f"PSI: {drift_report['overall_psi']:.3f}"
+                f"{drift_flag}"
             )
 
             if verdict == "ANOMALY":
