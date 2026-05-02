@@ -1,0 +1,65 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: ml-drift-alerts
+  namespace: monitoring
+  labels:
+    release: monitoring          # must match your kube-prometheus-stack release name
+spec:
+  groups:
+    - name: ml.drift
+      interval: 30s
+      rules:
+
+        # ── Recording rule: smooth the PSI over 5 minutes ──────────
+        # Raw PSI can spike momentarily — smoothing prevents alert flap
+        - record: aiops:ml_drift_psi_5m
+          expr: avg_over_time(ml_drift_psi[5m])
+
+        # ── Warning: drift is building ──────────────────────────────
+        # PSI 0.1-0.2 = moderate drift. Watch but don't page.
+        # fires after 5 minutes sustained to avoid transient noise
+        - alert: MLDriftWarning
+          expr: aiops:ml_drift_psi_5m > 0.1
+          for: 5m
+          labels:
+            severity: warning
+            team: mlops
+          annotations:
+            summary: "ML model input drift detected (moderate)"
+            description: >
+              PSI={{ $value | printf "%.3f" }} has been above 0.10 for 5 minutes.
+              This means the live metric distributions have shifted from training baseline.
+              PSI 0.1-0.2 = monitor. PSI > 0.2 = retrain.
+              Check Grafana drift dashboard for which feature is worst.
+
+        # ── Critical: significant drift — model needs retraining ────
+        # PSI > 0.2 is the industry threshold for "retrain now"
+        # fires after 10 minutes to be sure it's sustained
+        - alert: MLDriftCritical
+          expr: aiops:ml_drift_psi_5m > 0.2
+          for: 10m
+          labels:
+            severity: critical
+            team: mlops
+          annotations:
+            summary: "ML model significant drift — retraining required"
+            description: >
+              PSI={{ $value | printf "%.3f" }} has exceeded 0.20 for 10 minutes.
+              The anomaly detection model is scoring on distributions it was not trained on.
+              Trigger retraining pipeline immediately.
+              Worst feature visible in ml_drift_feature_psi metric.
+
+        # ── Drift detector went silent ───────────────────────────────
+        # If ml_drift_psi stops being scraped, something is broken
+        - alert: MLDriftDetectorDown
+          expr: absent(ml_drift_psi)
+          for: 2m
+          labels:
+            severity: warning
+            team: mlops
+          annotations:
+            summary: "Drift detector metric missing"
+            description: >
+              ml_drift_psi has not been scraped for 2 minutes.
+              Ensemble engine may have crashed or port 8000 is unreachable.
